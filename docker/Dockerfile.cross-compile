@@ -1,0 +1,48 @@
+# Native arm64 build container — runs without emulation on Apple Silicon (M-series).
+# Produces a real aarch64 binary that runs directly on RK3588 (Debian/Ubuntu).
+#
+# Build (from playground/ directory so we can COPY the RKNN SDK):
+#   docker build --platform linux/arm64 \
+#     -f zipformer-rnnt-cpp/docker/Dockerfile.cross-compile \
+#     -t zipformer-arm64 \
+#     rknn-toolkit2
+#
+# Compile (mount project source):
+#   docker run --platform linux/arm64 --rm \
+#     -v $PWD/zipformer-rnnt-cpp:/src \
+#     zipformer-arm64
+#
+# The binary appears at: zipformer-rnnt-cpp/build_arm64/zipformer_asr
+
+FROM --platform=linux/arm64 ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── System packages ───────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake pkg-config \
+    python3 python3-pip \
+    libsndfile1-dev \
+    libsentencepiece-dev \
+    wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── RKNN runtime SDK ──────────────────────────────────────────────────────────
+COPY rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so /usr/local/lib/
+COPY rknpu2/runtime/Linux/librknn_api/include/             /usr/local/include/
+RUN ldconfig
+
+# ── Source mount point ────────────────────────────────────────────────────────
+WORKDIR /src
+
+CMD cmake -B build_arm64 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_RKNN=ON \
+          -DRKNN_API_PATH=/usr/local \
+          -DCMAKE_CXX_FLAGS="-march=armv8.2-a" \
+    && cmake --build build_arm64 --parallel $(nproc) \
+    && mkdir -p build_arm64/lib \
+    && cp -v /usr/lib/aarch64-linux-gnu/libsentencepiece.so* build_arm64/lib/ \
+    && cp -v /usr/local/lib/librknnrt.so                     build_arm64/lib/ \
+    && echo "--- libs in build_arm64/lib/ ---" \
+    && ls -lh build_arm64/lib/
